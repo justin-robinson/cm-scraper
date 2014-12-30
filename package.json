@@ -1,0 +1,14 @@
+{
+  "author": "Justin Robinson",
+  "name": "cm-scraper",
+  "description": "scrape for new cm12 builds",
+  "version": "0.0.1",
+  "dependencies": {
+    "phridge" : "git://github.com/peerigon/phridge.git",
+    "mysql" : "2.5.4",
+    "nodemailer" : "*"
+  },
+  "engines": {
+    "node": "*"
+  }
+}
