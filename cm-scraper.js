@@ -121,7 +121,12 @@ phridge.spawn()
     });
 
     // save this run
-    connection.query('INSERT INTO `scripts`.`cm-scraper` (`rom_timestamp`, `rom_url`) VALUES ?;', [[thisScrape]], function(err, row, fields){});
+    connection.query('\
+      INSERT INTO\
+       `scripts`.`cm-scraper`\
+          (`rom_timestamp`, `rom_url`) \
+      VALUES ?;',
+      [[thisScrape]], function(err, row, fields){});
 
     // close db connection
     connection.end();
