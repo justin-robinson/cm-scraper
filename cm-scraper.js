@@ -17,49 +17,26 @@ phridge.spawn()
     return page.run(function ( resolve ) {
       var page = this;
 
-      page.open("http://www.invisiblek.org/roms/cm-12.0/vs985/", function (status) {
+      page.open("http://download.cyanogenmod.org/?device=vs985", function (status) {
 
         var thisScrape = page.evaluate(function () {
 
-          // get the files
-          var $files = $('.file');
+          // get the latest filename
+          var $latestFileElement = $('.table tbody tr:nth-child(1) td:nth-child(3) a:nth-child(3)');
+          var latestFileName = $latestFileElement.html();
 
-          // timestamp of latest rom we have found so far
-          var latestTimestamp = 0;
-
-          // index into jquery selector for the latest rom
-          var latestRomIndex = 0;
-
-          // loop over all file elements
-          $files.each(function(index){
-
-            // break down the date for this file into parts
-            var dateParts = $(this).find('.date').html().match(/(\d+)-(\d+)-(\d+) (\d+):(\d+)/);
-
-            // create a new date object
-            var date = new Date(
-              dateParts[1], // year
-              dateParts[2], // month
-              dateParts[3], // day
-              dateParts[4], // hour
-              dateParts[5]  // minute
-              );
-
-            // make timestamp from date object
-            var timestamp = date.getTime();
-
-            // if this is the latest rom on the page, we mark it for
-            if ( timestamp > latestTimestamp ){
-
-              latestTimestamp = timestamp;
-
-              latestRomIndex = index;
-            }
-
-          });
+          // get date of latest file
+          var dateParts = latestFileName.split('-')[2].match(/(\d{4})(\d{2})(\d{2})/);
+          var date = new Date(
+            dateParts[1],
+            dateParts[2],
+            dateParts[3],
+            0,
+            0
+          );
 
           // return timestamp of latest rom and url
-          return [latestTimestamp, window.location.hostname + $($files[latestRomIndex]).find('a:first').attr('href')];
+          return [date.getTime(), window.location.hostname + $latestFileElement.attr('href')];
         });
 
         // return this scrape back to node
@@ -69,7 +46,7 @@ phridge.spawn()
   })
 
 
-  // phridge.disposeAll() exits cleanly all previously created child processes.
+  // phridge.disposeAll exits cleanly all previously created child processes.
   // This should be called in any case to clean up everything.
   .finally(phridge.disposeAll)
 
