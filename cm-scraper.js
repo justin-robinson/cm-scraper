@@ -2,11 +2,13 @@
 
 var phridge = require('phridge');
 var mysql = require('mysql');
-var nodemailer = require('nodemailer');
-var connectionParams = require('/scripts/chameleon_mysql_connection.json');
+var pushbullet = require('pushbullet');
+var pushbulletAccessTokens = require('./pushbullet_access_tokens.json');
+var connectionParams = require('../chameleon_mysql_connection.json');
 var connection = mysql.createConnection(connectionParams);
+var async = require('async');
 
-// phridge.spawn() creates a new PhantomJS process
+//creates a new PhantomJS process
 phridge.spawn()
 
   .then(function (phantom) {
@@ -36,7 +38,10 @@ phridge.spawn()
           );
 
           // return timestamp of latest rom and url
-          return [date.getTime(), window.location.hostname + $latestFileElement.attr('href')];
+          return {
+            rom_timestamp : date.getTime(),
+            rom_url       : window.location.protocol + "//" + window.location.hostname + $latestFileElement.attr('href')
+          };
         });
 
         // return this scrape back to node
@@ -51,13 +56,6 @@ phridge.spawn()
   .finally(phridge.disposeAll)
 
   .done(function (thisScrape) {
-
-    // thisScrape is an array with the first element being the unix timestamp of the roms build date
-    // and the second element being the url to download the rom
-
-    // connect to db
-    connection.connect();
-
 
     // get last scrape
     connection.query('\
@@ -76,35 +74,58 @@ phridge.spawn()
       var firstRun = typeof lastScrape === 'undefined';
 
       // has an update been found?
-      var newRomFound = firstRun || thisScrape[0] > parseInt(lastScrape.rom_timestamp);
-      if ( newRomFound ) {
+      var newRomFound = firstRun || thisScrape.timestamp > parseInt(lastScrape.rom_timestamp);
+      if ( newRomFound || true) {
 
-        // mail directly from this box
-        var transporter = nodemailer.createTransport();
+        async.each(pushbulletAccessTokens,function(token, callback){
 
-        // setup e-mail data with unicode symbols
-        var mailOptions = {
-            from: 'CM Scraper✔ <cm-scraper@jor.pw>',
-            to: require('/scripts/cm-scraper/email_list.json'),
-            subject: 'NEW ROM',
-            text: thisScrape[1],
-            html: '<a href=\'' + thisScrape[1] + '\'>download</a>'
-        };
+          var pusher = new pushbullet(token);
 
-        // send dat shit
-        transporter.sendMail(mailOptions);
+          pusher.devices(function(error, response){
+
+            if ( error ){
+              callback(error);
+            }
+            var devices = response.devices;
+
+            async.each(devices, function(device, callback){
+              if ( device.pushable ){
+                var fileName = thisScrape.rom_url.split('/');
+                fileName = fileName[fileName.length-1];
+                pusher.note(device.iden, 'NEW ROM', fileName, function(error, response){
+                  if ( error ){
+                    callback(error);
+                  } else{
+                    console.log("pushed to " + response.iden);
+                    callback();
+                  }
+                });
+              }
+            }, function(err) {
+              if ( err ){
+                console.log(err);
+              } else {
+                console.log("pushed to all devices for access token " + token);
+              }
+            })
+
+          });
+
+        },function(err){
+
+          if ( err ){
+            console.log(err);
+          } else {
+            console.log("pushed to all account!");
+          }
+
+        });
       }
 
     });
 
     // save this run
-    connection.query('\
-      INSERT INTO\
-       `scripts`.`cm-scraper`\
-          (`rom_timestamp`, `rom_url`) \
-      VALUES ?;',
-      [[thisScrape]], function(err, row, fields){});
-
+    connection.query('INSERT INTO `scripts`.`cm-scraper` SET ?', thisScrape, function(err, row, fields){});
     // close db connection
     connection.end();
 
