@@ -16,46 +16,92 @@ phridge.spawn()
     // we are inside phantomjs here so we can't see the global scope of node
     var page = phantom.createPage();
 
-    return page.run(function ( resolve ) {
+    return page.run(function ( resolve, reject ) {
       var page = this;
+      var url = "http://download.cyanogenmod.org/?device=vs985";
+      var statusCode = null;
+      var errors = [];
 
-      page.open("http://download.cyanogenmod.org/?device=vs985", function (status) {
+      // called every time an asset is loaded
+      page.onResourceReceived = function(response){
+        // was this our main page?
+        if ( response.url === url && !statusCode ){
 
-        var thisScrape = page.evaluate(function () {
+          // save http status code
+          statusCode = response.status;
 
-          // get the latest filename
-          var $latestFileElement = $('.table tbody tr:nth-child(1) td:nth-child(3) a:nth-child(3)');
-          var latestFileName = $latestFileElement.html();
+          console.log(url + " : " + response.status + " " + response.statusText);
+        }
+      };
 
-          // get date of latest file
-          var dateParts = latestFileName.split('-')[2].match(/(\d{4})(\d{2})(\d{2})/);
-          var date = new Date(
-            dateParts[1],
-            dateParts[2],
-            dateParts[3],
-            0,
-            0
-          );
 
-          // return timestamp of latest rom and url
-          return {
-            rom_timestamp : date.getTime(),
-            rom_url       : window.location.protocol + "//" + window.location.hostname + $latestFileElement.attr('href')
-          };
-        });
+      page.onResourceError = function(resourceError) {
+        errors.push(resourceError);
+        console.log("RESOURCE ERROR : " + resourceError.errorString);
+      };
 
-        // return this scrape back to node
-        resolve(thisScrape);
+      // called on redirects
+      page.onUrlChanged = function(targetURL){
+
+        // if it actually changed
+        if ( url !== targetURL ){
+          console.log("Redirected from " + url + " to " + targetURL);
+
+          // update url
+          url = targetURL;
+
+        }
+
+      };
+
+      console.log("opening " + url);
+      page.open(url, function (status) {
+
+        if ( status === "success" ){
+
+          console.log("opened " + url);
+
+          var thisScrape = page.evaluate(function () {
+
+            // get the latest filename
+            var $latestFileElement = $('.table tbody tr:nth-child(1) td:nth-child(3) a:nth-child(3)');
+            var latestFileName = $latestFileElement.html();
+
+            // get date of latest file
+            var dateParts = latestFileName.split('-')[2].match(/(\d{4})(\d{2})(\d{2})/);
+            var date = new Date(
+              dateParts[1],
+              dateParts[2],
+              dateParts[3],
+              0,
+              0
+            );
+
+            // return timestamp of latest rom and url
+            return {
+              rom_timestamp : date.getTime(),
+              rom_url       : window.location.protocol + "//" + window.location.hostname + $latestFileElement.attr('href')
+            };
+          });
+
+          // return this scrape back to node
+          resolve(thisScrape);
+
+        } else {
+          console.log("failed opening " + url);
+          reject("failed opening " + url );
+        }
+
       });
+
+
     });
   })
 
+  .then(function (thisScrape) {
 
-  // phridge.disposeAll exits cleanly all previously created child processes.
-  // This should be called in any case to clean up everything.
-  .finally(phridge.disposeAll)
 
-  .done(function (thisScrape) {
+    console.log("getting timestamp from last scrape");
 
     // get last scrape
     connection.query('\
@@ -65,17 +111,21 @@ phridge.spawn()
       `scripts`.`cm-scraper` \
     ORDER BY \
       `runID` DESC\
-    LIMIT 1;', function(err, row, fields){
+    LIMIT 1;', function(error, rows, fields){
+
+      console.log("got last scrape");
 
       // last scrape saved
-      var lastScrape = row[0];
+      var lastScrape = rows[0];
 
       // is this our first run?
       var firstRun = typeof lastScrape === 'undefined';
 
       // has an update been found?
-      var newRomFound = firstRun || thisScrape.timestamp > parseInt(lastScrape.rom_timestamp);
-      if ( newRomFound || true) {
+      var newRomFound = thisScrape.rom_timestamp > parseInt(lastScrape.rom_timestamp) || firstRun;
+      if ( newRomFound ) {
+
+        console.log("new rom found!!");
 
         async.each(pushbulletAccessTokens,function(token, callback){
 
@@ -101,9 +151,9 @@ phridge.spawn()
                   }
                 });
               }
-            }, function(err) {
-              if ( err ){
-                console.log(err);
+            }, function(error) {
+              if ( error ){
+                console.log(error);
               } else {
                 console.log("pushed to all devices for access token " + token);
               }
@@ -111,10 +161,10 @@ phridge.spawn()
 
           });
 
-        },function(err){
+        },function(error){
 
-          if ( err ){
-            console.log(err);
+          if ( error ){
+            console.log(error);
           } else {
             console.log("pushed to all account!");
           }
@@ -124,13 +174,27 @@ phridge.spawn()
 
     });
 
+
+    console.log("saving this run to the db");
+
     // save this run
-    connection.query('INSERT INTO `scripts`.`cm-scraper` SET ?', thisScrape, function(err, row, fields){});
+    connection.query('INSERT INTO `scripts`.`cm-scraper` SET ?', thisScrape, function(error, row, fields){});
     // close db connection
     connection.end();
 
-  }, function (err) {
+  }, function (error) {
       // Don't forget to handle errors
       // In this case we're just throwing it
-      throw err;
-  });
+      throw error;
+  })
+
+  .catch(function(error){
+      throw error;
+  })
+
+  // phridge.disposeAll exits cleanly all previously created child processes.
+  // This should be called in any case to clean up everything.
+  .finally(function(){
+    console.log("closing phantom resources");
+    phridge.disposeAll();
+  })
