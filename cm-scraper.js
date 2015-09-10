@@ -63,9 +63,11 @@ phridge.spawn()
 
           var thisScrape = page.evaluate(function () {
 
-            // get the latest filename
-            var $latestFileElement = $('.table tbody tr:nth-child(1) td:nth-child(3) a:nth-child(3)');
-            var latestFileName = $latestFileElement.html();
+            // get the first row in the list of nightly roms
+            var $latestFileElement = $('.table tbody tr:nth-child(1) td:nth-child(3) a:nth-of-type(1)');
+            
+	    // get the name of the build in the first row
+	    var latestFileName = $latestFileElement.html();
 
             // get date of latest file
             var dateParts = latestFileName.split('-')[2].match(/(\d{4})(\d{2})(\d{2})/);
@@ -114,7 +116,7 @@ phridge.spawn()
     LIMIT 1;', function(error, rows, fields){
 
       console.log("got last scrape");
-
+      
       // last scrape saved
       var lastScrape = rows[0];
 
@@ -122,15 +124,18 @@ phridge.spawn()
       var firstRun = typeof lastScrape === 'undefined';
 
       // has an update been found?
-      var newRomFound = thisScrape.rom_timestamp > parseInt(lastScrape.rom_timestamp) || firstRun;
+      var newRomFound = firstRun ||  thisScrape.rom_timestamp > parseInt(lastScrape.rom_timestamp);
       if ( newRomFound ) {
 
         console.log("new rom found!!");
 
+        // push to each account
         async.each(pushbulletAccessTokens,function(token, callback){
 
+          // create a pusher object for this accout
           var pusher = new pushbullet(token);
 
+          // get all devices on this account
           pusher.devices(function(error, response){
 
             if ( error ){
@@ -138,8 +143,12 @@ phridge.spawn()
             }
             var devices = response.devices;
 
-            async.each(devices, function(device, callback){
-              if ( device.pushable ){
+            // push to each device
+            async.each(devices, function(device, callback) {
+
+              // only push to android phones
+              if ( device.pushable && device.type === 'android' ){
+
                 var fileName = thisScrape.rom_url.split('/');
                 fileName = fileName[fileName.length-1];
                 pusher.note(device.iden, 'NEW ROM', fileName, function(error, response){
